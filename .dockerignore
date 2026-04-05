@@ -1,0 +1,23 @@
+# Git
+.git
+
+# Node/Elm (frontend apps)
+**/node_modules
+**/elm-stuff
+**/dist
+
+# .NET build artifacts
+**/bin
+**/obj
+
+# Test projects (not needed in API image)
+tests/
+
+# Frontend source (not needed in API image)
+src/patient-app/
+src/admin-app/
+
+# IDE
+.vs/
+.idea/
+.vscode/
