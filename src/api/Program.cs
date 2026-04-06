@@ -59,6 +59,8 @@ app.MapAppointmentEndpoints();
 app.MapGet("/api/health", () => Results.Ok("healthy"));
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+
 app.Run();
 
 public partial class Program;
