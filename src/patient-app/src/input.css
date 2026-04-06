@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface-primary: #F5F3EE;
+  --color-surface-secondary: #C8DBBC;
+  --color-surface-inverse: #1B3A28;
+
+  --color-foreground-primary: #1B3A28;
+  --color-foreground-secondary: #4A6B52;
+  --color-foreground-muted: #7A9A80;
+  --color-foreground-inverse: #FFFFFF;
+
+  --color-accent-primary: #2D5E3A;
+
+  --color-danger: #AA3333;
+  --color-danger-light: #FFECEC;
+
+  --color-approved: #E8F5E1;
+
+  --font-sans: "Inter", sans-serif;
+  --font-mono: "Geist Mono", monospace;
+
+  --radius-input: 8px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+}
+
+@import "./site.css";

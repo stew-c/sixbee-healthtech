@@ -1,0 +1,79 @@
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply h-12 px-6 bg-accent-primary text-foreground-inverse font-medium rounded-input cursor-pointer hover:opacity-90 transition-opacity;
+  }
+  .btn-secondary {
+    @apply h-12 px-6 bg-white border border-gray-300 text-foreground-muted font-medium rounded-input cursor-pointer hover:bg-gray-50 transition-colors;
+  }
+  .btn-danger {
+    @apply h-12 px-6 bg-danger text-white font-medium rounded-input cursor-pointer hover:opacity-90 transition-opacity;
+  }
+  .btn-icon {
+    @apply h-8 w-8 flex items-center justify-center rounded-md cursor-pointer hover:bg-gray-100 transition-colors;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply h-11 w-full px-3 bg-white border border-gray-300 rounded-input text-foreground-primary placeholder:text-foreground-muted focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary;
+  }
+  .input-field-filled {
+    @apply h-11 w-full px-3 bg-surface-primary border border-gray-300 rounded-input text-foreground-primary focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary;
+  }
+  .input-textarea {
+    @apply w-full px-3 py-2 h-24 bg-white border border-gray-300 rounded-input text-foreground-primary placeholder:text-foreground-muted resize-none focus:outline-none focus:ring-2 focus:ring-accent-primary/30 focus:border-accent-primary;
+  }
+  .input-label {
+    @apply text-sm font-medium text-foreground-primary mb-1 block;
+  }
+
+  /* Layout */
+  .nav-bar {
+    @apply flex justify-between items-center h-14 px-6 bg-surface-inverse;
+  }
+  .page-container {
+    @apply flex flex-col p-6 gap-6;
+  }
+  .modal-overlay {
+    @apply fixed inset-0 flex items-center justify-center bg-black/40;
+  }
+  .modal-card {
+    @apply bg-white rounded-modal shadow-xl p-6;
+  }
+
+  /* Table */
+  .table-header-row {
+    @apply flex bg-surface-primary text-xs font-bold text-foreground-secondary uppercase border-b border-gray-200;
+  }
+  .table-row {
+    @apply flex bg-white border-b border-gray-100 min-h-13 items-center;
+  }
+  .table-row-approved {
+    @apply flex bg-approved border-b border-gray-100 min-h-13 items-center;
+  }
+  .table-cell {
+    @apply flex items-center px-4 py-2;
+  }
+
+  /* Badges */
+  .badge {
+    @apply inline-flex items-center h-7 px-3 rounded-full text-sm font-medium;
+  }
+  .badge-count {
+    @apply inline-flex items-center h-7 px-3 rounded-full text-sm font-medium bg-surface-secondary text-foreground-primary;
+  }
+  .badge-approved {
+    @apply inline-flex items-center h-7 px-3 rounded-full text-sm font-medium bg-approved text-accent-primary;
+  }
+  .badge-pending {
+    @apply inline-flex items-center h-7 px-3 rounded-full text-sm font-medium bg-surface-primary text-foreground-secondary border border-gray-300;
+  }
+  .badge-danger {
+    @apply inline-flex items-center h-7 px-3 rounded-full text-sm font-medium bg-danger-light text-danger;
+  }
+
+  /* Typography */
+  .text-data {
+    @apply font-mono;
+  }
+}
