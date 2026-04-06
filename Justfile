@@ -6,16 +6,31 @@ default:
 build-api:
     dotnet build SixBee.sln
 
+test: test-unit test-integration test-bdd
+
 test-unit:
     dotnet test tests/SixBee.Auth.Tests
+    dotnet test tests/SixBee.Appointments.Tests
 
 test-integration:
     #!/usr/bin/env bash
     set -uo pipefail
     docker compose up db -d --wait
-    dotnet test tests/SixBee.Auth.Data.Tests; result=$?
+    dotnet test tests/SixBee.Appointments.Data.Tests; r1=$?
+    dotnet test tests/SixBee.Auth.Data.Tests; r2=$?
+    docker compose down
+    [ $r1 -eq 0 ] && [ $r2 -eq 0 ]
+
+test-bdd:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    docker compose up db api -d --wait
+    dotnet test tests/SixBee.Api.Tests; result=$?
     docker compose down
     exit $result
+
+publish:
+    docker compose build
 
 start:
     docker compose up -d
