@@ -37,3 +37,22 @@ start:
 
 stop:
     docker compose down
+
+# Open a terminal per service showing live logs
+logs:
+    #!/usr/bin/env bash
+    dir="$(pwd)"
+    for service in db api patient-app admin-app; do
+        osascript -e "tell application \"Terminal\" to do script \"cd '$dir' && docker compose logs -f $service\""
+    done
+
+# Full reset: wipe volumes, artifacts, rebuild from scratch
+reset:
+    docker compose down -v
+    find . -type d -name bin -exec rm -rf {} + 2>/dev/null || true
+    find . -type d -name obj -exec rm -rf {} + 2>/dev/null || true
+    find . -type d -name elm-stuff -exec rm -rf {} + 2>/dev/null || true
+    find . -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
+    find . -type d -name dist -exec rm -rf {} + 2>/dev/null || true
+    docker compose build --no-cache
+    docker compose up -d
