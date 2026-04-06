@@ -42,7 +42,7 @@ builder.Services.AddCors(options =>
             ?? ["http://localhost:3000", "http://localhost:3001"];
         policy.WithOrigins(origins)
             .WithHeaders("Content-Type", "Authorization")
-            .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE");
+            .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     });
 });
 
