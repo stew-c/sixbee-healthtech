@@ -15,5 +15,23 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: src/api/Dockerfile
+    ports:
+      - "5050:5000"
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=sixbee;Username=sixbee;Password=sixbee"
+      Jwt__Secret: "YourSuperSecretKeyThatIsAtLeast32Characters!"
+      Jwt__Issuer: "SixBee.Auth"
+      Jwt__Audience: "SixBee.Admin"
+      Jwt__ExpiryInMinutes: "120"
+      Cors__Origins__0: "http://localhost:3000"
+      Cors__Origins__1: "http://localhost:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   db-data:
