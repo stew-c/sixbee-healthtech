@@ -1,10 +1,10 @@
-module Main exposing (main)
+module Main exposing (FormFields, Model, Msg(..), SubmitState(..), init, main, update, validate)
 
 import Browser
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, form, h1, h2, input, label, p, small, span, text, textarea)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
-import Html.Events exposing (onInput, onSubmit)
+import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
 import Json.Encode as Encode
 
@@ -36,6 +36,7 @@ type Msg
     = UpdateField String String
     | Submit
     | GotResponse (Result Http.Error ())
+    | DismissError
 
 
 init : () -> ( Model, Cmd Msg )
@@ -92,6 +93,9 @@ update msg model =
                             "Something went wrong. Please try again."
             in
             ( { model | submitState = Error message }, Cmd.none )
+
+        DismissError ->
+            ( { model | submitState = NotSubmitted }, Cmd.none )
 
 
 setField : String -> String -> FormFields -> FormFields
@@ -209,7 +213,7 @@ encodeAppointment fields =
         [ ( "name", Encode.string fields.name )
         , ( "dateTime", Encode.string isoDateTime )
         , ( "description", Encode.string fields.description )
-        , ( "contactNumber", Encode.string fields.contactNumber )
+        , ( "contactNumber", Encode.string (String.filter Char.isDigit fields.contactNumber) )
         , ( "email", Encode.string fields.email )
         ]
 
@@ -246,17 +250,23 @@ viewContent : Model -> Html Msg
 viewContent model =
     case model.submitState of
         Success ->
-            div [ class "bg-green-50 border border-green-200 rounded-lg p-6" ]
-                [ h2 [ class "text-xl font-semibold text-green-800 mb-2" ]
+            div [ class "bg-approved border border-surface-secondary rounded-card p-6 text-center" ]
+                [ h2 [ class "text-xl font-semibold text-foreground-primary mb-2" ]
                     [ text "Booking Submitted" ]
-                , p [ class "text-green-700" ]
-                    [ text "Your appointment request has been submitted successfully. We will review it shortly." ]
+                , p [ class "text-foreground-secondary" ]
+                    [ text "Thank you, your appointment request has been submitted. We will be in touch shortly." ]
                 ]
 
         Error errMsg ->
             div []
-                [ div [ class "bg-red-50 border border-red-200 rounded-lg p-4 mb-6" ]
-                    [ p [ class "text-red-700" ] [ text errMsg ] ]
+                [ div [ class "bg-danger-light border border-danger rounded-card p-4 mb-6 flex justify-between items-center" ]
+                    [ p [ class "text-danger text-sm" ] [ text errMsg ]
+                    , button
+                        [ class "text-danger text-sm font-medium cursor-pointer hover:underline"
+                        , onClick DismissError
+                        ]
+                        [ text "Dismiss" ]
+                    ]
                 , viewForm model
                 ]
 
@@ -277,7 +287,15 @@ viewForm model =
         , viewField "contactNumber" "Contact Number *" "text" "07xxx xxx xxx" model
         , viewField "email" "Email Address *" "email" "you@example.com" model
         , button
-            [ class "btn-primary w-full"
+            [ class
+                ("btn-primary w-full"
+                    ++ (if isSubmitting then
+                            " opacity-75 cursor-not-allowed"
+
+                        else
+                            ""
+                       )
+                )
             , type_ "submit"
             , disabled isSubmitting
             ]
