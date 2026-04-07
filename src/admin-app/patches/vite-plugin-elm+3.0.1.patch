@@ -1,0 +1,13 @@
+diff --git a/node_modules/vite-plugin-elm/dist/index.js b/node_modules/vite-plugin-elm/dist/index.js
+index c04a6ae..9fa05f3 100644
+--- a/node_modules/vite-plugin-elm/dist/index.js
++++ b/node_modules/vite-plugin-elm/dist/index.js
+@@ -14,7 +14,7 @@ const trimDebugMessage = (code) => code.replace(/(console\.warn\('Compiled in DE
+ const viteProjectPath = (dependency) => `/${relative(process.cwd(), dependency)}`;
+ const parseImportId = (id) => {
+     const parsedId = new URL(id, 'file://');
+-    const pathname = parsedId.pathname;
++    const pathname = decodeURIComponent(parsedId.pathname);
+     const valid = pathname.endsWith('.elm') && !parsedId.searchParams.has('raw');
+     const withParams = parsedId.searchParams.getAll('with');
+     return {
