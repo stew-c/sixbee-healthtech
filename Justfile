@@ -6,7 +6,7 @@ default:
 build-api:
     dotnet build SixBee.sln
 
-test: test-unit test-integration test-bdd
+test: test-unit test-integration test-bdd test-elm
 
 test-unit:
     dotnet test tests/SixBee.Auth.Tests
@@ -56,3 +56,9 @@ reset:
     find . -type d -name dist -exec rm -rf {} + 2>/dev/null || true
     docker compose build --no-cache
     docker compose up -d
+
+test-elm:
+    cd src/patient-app && npx elm-test
+
+build-patient:
+    cd src/patient-app && npm run build
