@@ -41,5 +41,13 @@ services:
     depends_on:
       - api
 
+  admin-app:
+    build:
+      context: ./src/admin-app
+    ports:
+      - "3001:3001"
+    depends_on:
+      - api
+
 volumes:
   db-data:
