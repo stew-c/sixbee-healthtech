@@ -6,6 +6,7 @@ import Html exposing (Html, button, div, form, h1, h2, input, label, p, small, s
 import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onInput, onSubmit)
 import Http
+import Json.Encode as Encode
 
 
 type SubmitState
@@ -70,7 +71,9 @@ update msg model =
                     validate model.formFields
             in
             if Dict.isEmpty errors then
-                ( { model | fieldErrors = Dict.empty, submitState = Submitting }, Cmd.none )
+                ( { model | fieldErrors = Dict.empty, submitState = Submitting }
+                , submitAppointment model.formFields
+                )
 
             else
                 ( { model | fieldErrors = errors }, Cmd.none )
@@ -79,7 +82,16 @@ update msg model =
             ( { model | submitState = Success }, Cmd.none )
 
         GotResponse (Err err) ->
-            ( { model | submitState = Error (httpErrorToString err) }, Cmd.none )
+            let
+                message =
+                    case err of
+                        Http.BadStatus 400 ->
+                            "Please check your details and try again."
+
+                        _ ->
+                            "Something went wrong. Please try again."
+            in
+            ( { model | submitState = Error message }, Cmd.none )
 
 
 setField : String -> String -> FormFields -> FormFields
@@ -167,23 +179,39 @@ validateEmail email =
                 Just ( "email", "A valid email address is required" )
 
 
-httpErrorToString : Http.Error -> String
-httpErrorToString err =
-    case err of
-        Http.BadUrl url ->
-            "Bad URL: " ++ url
+submitAppointment : FormFields -> Cmd Msg
+submitAppointment fields =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = "/api/appointments"
+        , body = Http.jsonBody (encodeAppointment fields)
+        , expect = Http.expectWhatever GotResponse
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
-        Http.Timeout ->
-            "Request timed out"
 
-        Http.NetworkError ->
-            "Network error"
+encodeAppointment : FormFields -> Encode.Value
+encodeAppointment fields =
+    let
+        isoDateTime =
+            if String.contains "Z" fields.dateTime then
+                fields.dateTime
 
-        Http.BadStatus status ->
-            "Error: " ++ String.fromInt status
+            else if String.length fields.dateTime == 16 then
+                fields.dateTime ++ ":00Z"
 
-        Http.BadBody body ->
-            "Bad response: " ++ body
+            else
+                fields.dateTime ++ "Z"
+    in
+    Encode.object
+        [ ( "name", Encode.string fields.name )
+        , ( "dateTime", Encode.string isoDateTime )
+        , ( "description", Encode.string fields.description )
+        , ( "contactNumber", Encode.string fields.contactNumber )
+        , ( "email", Encode.string fields.email )
+        ]
 
 
 view : Model -> Html Msg
