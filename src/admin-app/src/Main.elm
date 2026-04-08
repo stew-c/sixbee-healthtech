@@ -11,6 +11,7 @@ import Appointment exposing (Appointment, AppointmentListResponse, appointmentLi
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Pagination
 import Session exposing (Session)
 import Url
 import Url.Parser as Parser exposing (Parser)
@@ -76,9 +77,7 @@ type alias Model =
     , password : String
     , loginState : LoginState
     , appointments : List Appointment
-    , totalCount : Int
-    , currentPage : Int
-    , pageSize : Int
+    , pagination : Pagination.Model
     , dashboardError : Maybe String
     , editModal : Maybe EditModalState
     , approveModal : Maybe Appointment
@@ -125,6 +124,7 @@ type Msg
     | CloseDeleteModal
     | ConfirmDelete
     | GotDeleteResponse (Result Http.Error ())
+    | PaginationMsg Pagination.Msg
     | Logout
     | NoOp
 
@@ -197,9 +197,7 @@ init flags url key =
       , password = ""
       , loginState = Idle
       , appointments = []
-      , totalCount = 0
-      , currentPage = 1
-      , pageSize = 10
+      , pagination = Pagination.init
       , dashboardError = Nothing
       , editModal = Nothing
       , approveModal = Nothing
@@ -428,10 +426,13 @@ update msg model =
             ( { model | loginState = LoginError message }, Cmd.none )
 
         GotAppointments (Ok response) ->
+            let
+                pag =
+                    model.pagination
+            in
             ( { model
                 | appointments = response.items
-                , totalCount = response.totalCount
-                , currentPage = response.page
+                , pagination = { pag | totalCount = response.totalCount, currentPage = response.page }
                 , dashboardError = Nothing
               }
             , Cmd.none
@@ -471,12 +472,12 @@ update msg model =
 
         GotApproveResponse (Ok _) ->
             ( { model | approveModal = Nothing, approving = False }
-            , fetchAppointments model.session model.currentPage model.pageSize
+            , fetchAppointments model.session model.pagination.currentPage model.pagination.pageSize
             )
 
         GotApproveResponse (Err _) ->
             ( { model | approveModal = Nothing, approving = False, dashboardError = Just "Failed to approve appointment." }
-            , fetchAppointments model.session model.currentPage model.pageSize
+            , fetchAppointments model.session model.pagination.currentPage model.pagination.pageSize
             )
 
         OpenEditModal appointment ->
@@ -540,7 +541,7 @@ update msg model =
 
         GotSaveEditResponse (Ok _) ->
             ( { model | editModal = Nothing }
-            , fetchAppointments model.session model.currentPage model.pageSize
+            , fetchAppointments model.session model.pagination.currentPage model.pagination.pageSize
             )
 
         GotSaveEditResponse (Err err) ->
@@ -581,12 +582,12 @@ update msg model =
 
         GotDeleteResponse (Ok _) ->
             ( { model | deleteModal = Nothing, deleting = False }
-            , fetchAppointments model.session model.currentPage model.pageSize
+            , fetchAppointments model.session model.pagination.currentPage model.pagination.pageSize
             )
 
         GotDeleteResponse (Err _) ->
             ( { model | deleteModal = Nothing, deleting = False, dashboardError = Just "Failed to delete appointment." }
-            , fetchAppointments model.session model.currentPage model.pageSize
+            , fetchAppointments model.session model.pagination.currentPage model.pagination.pageSize
             )
 
         Logout ->
@@ -603,6 +604,15 @@ update msg model =
                 ]
             )
 
+        PaginationMsg paginationMsg ->
+            let
+                newPagination =
+                    Pagination.update paginationMsg model.pagination
+            in
+            ( { model | pagination = newPagination }
+            , fetchAppointments model.session newPagination.currentPage newPagination.pageSize
+            )
+
         NoOp ->
             ( model, Cmd.none )
 
@@ -615,17 +625,57 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "SixBee HealthTech — Admin Portal"
     , body =
-        [ case model.page of
-            LoginPage ->
-                viewLogin model
+        [ div []
+            [ viewNavBar model.session
+            , case model.page of
+                LoginPage ->
+                    viewLogin model
 
-            DashboardPage ->
-                viewDashboard model
+                DashboardPage ->
+                    viewDashboard model
 
-            NotFoundPage ->
-                viewNotFound
+                NotFoundPage ->
+                    viewNotFound
+            ]
         ]
     }
+
+
+viewNavBar : Session -> Html Msg
+viewNavBar session =
+    case Session.getEmail session of
+        Nothing ->
+            text ""
+
+        Just email ->
+            div [ class "nav-bar" ]
+                [ div [ class "flex items-center gap-3" ]
+                    [ div [ class "text-surface-secondary" ] [ heartPulseIcon ]
+                    , span [ class "text-white font-semibold text-sm" ]
+                        [ text "SixBee HealthTech" ]
+                    ]
+                , div [ class "flex items-center gap-4" ]
+                    [ span [ class "text-surface-secondary text-sm" ]
+                        [ text email ]
+                    , button
+                        [ class "flex items-center gap-1.5 h-8 px-3 bg-accent-primary text-white text-sm font-medium rounded-md cursor-pointer hover:opacity-90"
+                        , onClick Logout
+                        ]
+                        [ logoutIcon
+                        , text "Logout"
+                        ]
+                    ]
+                ]
+
+
+logoutIcon : Html msg
+logoutIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24", SvgA.width "14", SvgA.height "14", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
+        [ Svg.path [ SvgA.d "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" ] []
+        , Svg.path [ SvgA.d "M16 17l5-5-5-5" ] []
+        , Svg.path [ SvgA.d "M21 12H9" ] []
+        ]
 
 
 viewLogin : Model -> Html Msg
@@ -738,6 +788,7 @@ viewDashboard model =
             [ viewDashboardHeader model
             , viewDashboardError model.dashboardError
             , viewAppointmentsTable model.appointments
+            , Html.map PaginationMsg (Pagination.view model.pagination)
             ]
         , viewEditModal model.editModal
         , viewApproveModal model.approveModal model.approving
@@ -970,7 +1021,7 @@ viewDashboardHeader model =
         [ h1 [ class "text-2xl font-bold text-foreground-primary" ]
             [ text "Appointments" ]
         , span [ class "badge-count" ]
-            [ text (String.fromInt model.totalCount ++ " appointments") ]
+            [ text (String.fromInt model.pagination.totalCount ++ " appointments") ]
         ]
 
 
