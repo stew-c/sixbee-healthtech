@@ -140,4 +140,3 @@ viewPageButton currentPage page =
         , onClick (GoToPage page)
         ]
         [ text (String.fromInt page) ]
- 
