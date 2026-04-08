@@ -1,91 +1,918 @@
-module Icons exposing (approveCheck, close, deleteTrash, editPencil, heartPulse, logout)
+port module Main exposing (LoginResponse, LoginState(..), Model, Msg(..), Page(..), init, main, update)
 
-import Html exposing (Html)
+import Browser
+import Browser.Navigation as Nav
+import Html exposing (Html, button, div, form, h1, h2, input, label, p, small, span, table, tbody, td, text, textarea, th, thead, tr)
+import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
+import Html.Events exposing (onClick, onInput, onSubmit)
 import Svg
 import Svg.Attributes as SvgA
+import Appointment exposing (Appointment, AppointmentListResponse, appointmentListResponseDecoder)
+import Http
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Session exposing (Session)
+import Url
+import Url.Parser as Parser exposing (Parser)
 
 
-logout : Html msg
-logout =
-    icon 14
-        [ Svg.path [ SvgA.d "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" ] []
-        , Svg.path [ SvgA.d "M16 17l5-5-5-5" ] []
-        , Svg.path [ SvgA.d "M21 12H9" ] []
+port saveSession : Encode.Value -> Cmd msg
+
+
+port clearSession : () -> Cmd msg
+
+
+
+-- FLAGS
+
+
+type alias Flags =
+    Decode.Value
+
+
+
+-- ROUTING
+
+
+type Page
+    = LoginPage
+    | DashboardPage
+    | NotFoundPage
+
+
+routeParser : Parser (Page -> a) a
+routeParser =
+    Parser.oneOf
+        [ Parser.map LoginPage Parser.top
+        , Parser.map DashboardPage (Parser.s "dashboard")
         ]
 
 
-heartPulse : Html msg
-heartPulse =
-    iconWithClass 24
-        "text-foreground-inverse"
+urlToPage : Url.Url -> Page
+urlToPage url =
+    Parser.parse routeParser url
+        |> Maybe.withDefault NotFoundPage
+
+
+
+-- LOGIN STATE
+
+
+type LoginState
+    = Idle
+    | Submitting
+    | LoginError String
+
+
+
+-- MODEL
+
+
+type alias Model =
+    { key : Nav.Key
+    , page : Page
+    , session : Session
+    , email : String
+    , password : String
+    , loginState : LoginState
+    , appointments : List Appointment
+    , totalCount : Int
+    , currentPage : Int
+    , pageSize : Int
+    , dashboardError : Maybe String
+    , editModal : Maybe EditModalState
+    }
+
+
+type alias EditModalState =
+    { appointment : Appointment
+    , name : String
+    , dateTime : String
+    , description : String
+    , contactNumber : String
+    , email : String
+    , saving : Bool
+    , error : Maybe String
+    }
+
+
+
+-- MSG
+
+
+type Msg
+    = UrlRequested Browser.UrlRequest
+    | UrlChanged Url.Url
+    | UpdateEmail String
+    | UpdatePassword String
+    | SubmitLogin
+    | GotLoginResponse (Result Http.Error LoginResponse)
+    | GotAppointments (Result Http.Error AppointmentListResponse)
+    | OpenApproveModal Appointment
+    | OpenEditModal Appointment
+    | CloseEditModal
+    | EditField String String
+    | SaveEdit
+    | GotSaveEditResponse (Result Http.Error ())
+    | OpenDeleteModal Appointment
+    | Logout
+    | NoOp
+
+
+type alias LoginResponse =
+    { token : String
+    , expiresAt : String
+    }
+
+
+
+-- INIT
+
+
+flagsDecoder : Decode.Decoder { token : String, expiresAt : String, email : String }
+flagsDecoder =
+    Decode.map3 (\t e em -> { token = t, expiresAt = e, email = em })
+        (Decode.field "token" Decode.string)
+        (Decode.field "expiresAt" Decode.string)
+        (Decode.field "email" Decode.string)
+
+
+init : Flags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
+    let
+        session =
+            case Decode.decodeValue flagsDecoder flags of
+                Ok data ->
+                    Session.login data.token data.expiresAt data.email
+
+                Err _ ->
+                    Session.LoggedOut
+
+        page =
+            urlToPage url
+
+        isAuthenticated =
+            Session.isLoggedIn session
+
+        redirectedPage =
+            case ( isAuthenticated, page ) of
+                ( False, DashboardPage ) ->
+                    LoginPage
+
+                ( True, LoginPage ) ->
+                    DashboardPage
+
+                _ ->
+                    page
+    in
+    let
+        initialCmd =
+            if redirectedPage /= page then
+                Nav.pushUrl key (pageToPath redirectedPage)
+
+            else
+                Cmd.none
+
+        fetchCmd =
+            if redirectedPage == DashboardPage then
+                fetchAppointments session 1 10
+
+            else
+                Cmd.none
+    in
+    ( { key = key
+      , page = redirectedPage
+      , session = session
+      , email = ""
+      , password = ""
+      , loginState = Idle
+      , appointments = []
+      , totalCount = 0
+      , currentPage = 1
+      , pageSize = 10
+      , dashboardError = Nothing
+      , editModal = Nothing
+      }
+    , Cmd.batch [ initialCmd, fetchCmd ]
+    )
+
+
+pageToPath : Page -> String
+pageToPath page =
+    case page of
+        LoginPage ->
+            "/"
+
+        DashboardPage ->
+            "/dashboard"
+
+        NotFoundPage ->
+            "/"
+
+
+
+-- HTTP
+
+
+submitLogin : String -> String -> Cmd Msg
+submitLogin email password =
+    Http.post
+        { url = "/api/auth/login"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "email", Encode.string email )
+                    , ( "password", Encode.string password )
+                    ]
+                )
+        , expect = Http.expectJson GotLoginResponse loginResponseDecoder
+        }
+
+
+loginResponseDecoder : Decode.Decoder LoginResponse
+loginResponseDecoder =
+    Decode.map2 LoginResponse
+        (Decode.field "token" Decode.string)
+        (Decode.field "expiresAt" Decode.string)
+
+
+fetchAppointments : Session -> Int -> Int -> Cmd Msg
+fetchAppointments session page pageSize =
+    case Session.getToken session of
+        Just token ->
+            Http.request
+                { method = "GET"
+                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/appointments?page=" ++ String.fromInt page ++ "&pageSize=" ++ String.fromInt pageSize
+                , body = Http.emptyBody
+                , expect = Http.expectJson GotAppointments appointmentListResponseDecoder
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            Cmd.none
+
+
+
+saveAppointment : Session -> EditModalState -> Cmd Msg
+saveAppointment session state =
+    case Session.getToken session of
+        Just token ->
+            let
+                isoDateTime =
+                    if String.contains "Z" state.dateTime || String.contains "+" state.dateTime then
+                        state.dateTime
+
+                    else if String.length state.dateTime == 16 then
+                        state.dateTime ++ ":00Z"
+
+                    else
+                        state.dateTime ++ "Z"
+            in
+            Http.request
+                { method = "PUT"
+                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/appointments/" ++ state.appointment.id
+                , body =
+                    Http.jsonBody
+                        (Encode.object
+                            [ ( "name", Encode.string state.name )
+                            , ( "dateTime", Encode.string isoDateTime )
+                            , ( "description", Encode.string state.description )
+                            , ( "contactNumber", Encode.string state.contactNumber )
+                            , ( "email", Encode.string state.email )
+                            ]
+                        )
+                , expect = Http.expectWhatever GotSaveEditResponse
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            Cmd.none
+
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        UrlRequested urlRequest ->
+            case urlRequest of
+                Browser.Internal url ->
+                    ( model, Nav.pushUrl model.key (Url.toString url) )
+
+                Browser.External href ->
+                    ( model, Nav.load href )
+
+        UrlChanged url ->
+            let
+                page =
+                    urlToPage url
+
+                isAuthenticated =
+                    Session.isLoggedIn model.session
+            in
+            case ( isAuthenticated, page ) of
+                ( False, DashboardPage ) ->
+                    ( { model | page = LoginPage }, Nav.pushUrl model.key "/" )
+
+                ( True, LoginPage ) ->
+                    ( { model | page = DashboardPage }, Nav.pushUrl model.key "/dashboard" )
+
+                _ ->
+                    ( { model | page = page }, Cmd.none )
+
+        UpdateEmail email ->
+            ( { model | email = email, loginState = Idle }, Cmd.none )
+
+        UpdatePassword password ->
+            ( { model | password = password, loginState = Idle }, Cmd.none )
+
+        SubmitLogin ->
+            if String.trim model.email == "" || String.trim model.password == "" then
+                ( { model | loginState = LoginError "Email and password are required" }, Cmd.none )
+
+            else
+                ( { model | loginState = Submitting }
+                , submitLogin model.email model.password
+                )
+
+        GotLoginResponse (Ok response) ->
+            let
+                session =
+                    Session.login response.token response.expiresAt model.email
+            in
+            ( { model
+                | session = session
+                , loginState = Idle
+                , password = ""
+                , page = DashboardPage
+              }
+            , Cmd.batch
+                [ saveSession
+                    (Encode.object
+                        [ ( "token", Encode.string response.token )
+                        , ( "expiresAt", Encode.string response.expiresAt )
+                        , ( "email", Encode.string model.email )
+                        ]
+                    )
+                , Nav.pushUrl model.key "/dashboard"
+                , fetchAppointments session 1 10
+                ]
+            )
+
+        GotLoginResponse (Err err) ->
+            let
+                message =
+                    case err of
+                        Http.BadStatus 401 ->
+                            "Invalid email or password"
+
+                        _ ->
+                            "Something went wrong. Please try again."
+            in
+            ( { model | loginState = LoginError message }, Cmd.none )
+
+        GotAppointments (Ok response) ->
+            ( { model
+                | appointments = response.items
+                , totalCount = response.totalCount
+                , currentPage = response.page
+                , dashboardError = Nothing
+              }
+            , Cmd.none
+            )
+
+        GotAppointments (Err err) ->
+            case err of
+                Http.BadStatus 401 ->
+                    ( { model
+                        | session = Session.logout model.session
+                        , page = LoginPage
+                      }
+                    , Cmd.batch
+                        [ clearSession ()
+                        , Nav.pushUrl model.key "/"
+                        ]
+                    )
+
+                _ ->
+                    ( { model | dashboardError = Just "Failed to load appointments." }, Cmd.none )
+
+        OpenApproveModal _ ->
+            -- TODO: Component 15
+            ( model, Cmd.none )
+
+        OpenEditModal appointment ->
+            ( { model
+                | editModal =
+                    Just
+                        { appointment = appointment
+                        , name = appointment.name
+                        , dateTime = String.left 16 appointment.dateTime
+                        , description = appointment.description
+                        , contactNumber = appointment.contactNumber
+                        , email = appointment.email
+                        , saving = False
+                        , error = Nothing
+                        }
+              }
+            , Cmd.none
+            )
+
+        CloseEditModal ->
+            ( { model | editModal = Nothing }, Cmd.none )
+
+        EditField field val ->
+            case model.editModal of
+                Just state ->
+                    let
+                        updated =
+                            case field of
+                                "name" ->
+                                    { state | name = val }
+
+                                "dateTime" ->
+                                    { state | dateTime = val }
+
+                                "description" ->
+                                    { state | description = val }
+
+                                "contactNumber" ->
+                                    { state | contactNumber = val }
+
+                                "email" ->
+                                    { state | email = val }
+
+                                _ ->
+                                    state
+                    in
+                    ( { model | editModal = Just updated }, Cmd.none )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        SaveEdit ->
+            case model.editModal of
+                Just state ->
+                    ( { model | editModal = Just { state | saving = True, error = Nothing } }
+                    , saveAppointment model.session state
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotSaveEditResponse (Ok _) ->
+            ( { model | editModal = Nothing }
+            , fetchAppointments model.session model.currentPage model.pageSize
+            )
+
+        GotSaveEditResponse (Err err) ->
+            case model.editModal of
+                Just state ->
+                    let
+                        message =
+                            case err of
+                                Http.BadStatus 400 ->
+                                    "Please check your details and try again."
+
+                                Http.BadStatus 404 ->
+                                    "Appointment not found — it may have been deleted."
+
+                                _ ->
+                                    "Something went wrong. Please try again."
+                    in
+                    ( { model | editModal = Just { state | saving = False, error = Just message } }, Cmd.none )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        OpenDeleteModal _ ->
+            -- TODO: Component 16
+            ( model, Cmd.none )
+
+        Logout ->
+            ( { model
+                | session = Session.logout model.session
+                , page = LoginPage
+                , email = ""
+                , password = ""
+                , loginState = Idle
+              }
+            , Cmd.batch
+                [ clearSession ()
+                , Nav.pushUrl model.key "/"
+                ]
+            )
+
+        NoOp ->
+            ( model, Cmd.none )
+
+
+
+-- VIEW
+
+
+view : Model -> Browser.Document Msg
+view model =
+    { title = "SixBee HealthTech — Admin Portal"
+    , body =
+        [ case model.page of
+            LoginPage ->
+                viewLogin model
+
+            DashboardPage ->
+                viewDashboard model
+
+            NotFoundPage ->
+                viewNotFound
+        ]
+    }
+
+
+viewLogin : Model -> Html Msg
+viewLogin model =
+    let
+        isSubmitting =
+            model.loginState == Submitting
+    in
+    div [ class "min-h-screen bg-surface-primary flex items-center justify-center px-4" ]
+        [ div [ class "w-full max-w-sm" ]
+            [ form [ class "bg-white rounded-modal shadow-lg p-8", onSubmit SubmitLogin ]
+                [ div [ class "flex flex-col items-center gap-2 mb-6" ]
+                    [ div [ class "w-12 h-12 bg-surface-inverse rounded-card flex items-center justify-center" ]
+                        [ heartPulseIcon ]
+                    , h1 [ class "text-2xl font-bold text-foreground-primary" ]
+                        [ text "Admin Login" ]
+                    , p [ class "text-foreground-muted text-sm" ]
+                        [ text "Sign in to manage appointments" ]
+                    ]
+                , viewLoginError model.loginState
+                , div [ class "flex flex-col gap-4 mb-6" ]
+                    [ div [ class "flex flex-col gap-1" ]
+                        [ label [ class "input-label", for "email" ]
+                            [ text "Email Address" ]
+                        , input
+                            [ class "input-field"
+                            , type_ "email"
+                            , id "email"
+                            , placeholder "admin@sixbee.co.uk"
+                            , value model.email
+                            , onInput UpdateEmail
+                            ]
+                            []
+                        ]
+                    , div [ class "flex flex-col gap-1" ]
+                        [ label [ class "input-label", for "password" ]
+                            [ text "Password" ]
+                        , input
+                            [ class "input-field"
+                            , type_ "password"
+                            , id "password"
+                            , placeholder "••••••••"
+                            , value model.password
+                            , onInput UpdatePassword
+                            ]
+                            []
+                        ]
+                    ]
+                , button
+                    [ class
+                        ("btn-primary w-full"
+                            ++ (if isSubmitting then
+                                    " opacity-75 cursor-not-allowed"
+
+                                else
+                                    ""
+                               )
+                        )
+                    , type_ "submit"
+                    , disabled isSubmitting
+                    ]
+                    [ text
+                        (if isSubmitting then
+                            "Signing in..."
+
+                         else
+                            "Sign In"
+                        )
+                    ]
+                ]
+            , p [ class "text-center text-foreground-muted text-xs mt-6" ]
+                [ text "SixBee HealthTech — Staff Portal" ]
+            ]
+        ]
+
+
+viewLoginError : LoginState -> Html Msg
+viewLoginError state =
+    case state of
+        LoginError message ->
+            div [ class "bg-danger-light border border-danger rounded-input p-3 mb-4" ]
+                [ p [ class "text-danger text-sm" ] [ text message ] ]
+
+        _ ->
+            text ""
+
+
+heartPulseIcon : Html msg
+heartPulseIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24"
+        , SvgA.width "24"
+        , SvgA.height "24"
+        , SvgA.fill "none"
+        , SvgA.stroke "currentColor"
+        , SvgA.strokeWidth "2"
+        , SvgA.strokeLinecap "round"
+        , SvgA.strokeLinejoin "round"
+        , SvgA.class "text-foreground-inverse"
+        ]
         [ Svg.path [ SvgA.d "M19.5 12.572l-7.5 7.428l-7.5-7.428A5 5 0 0 1 7.5 3.5c1.76 0 3.332.91 4.5 2.37C13.168 4.41 14.74 3.5 16.5 3.5a5 5 0 0 1 3 9.072z" ] []
         , Svg.path [ SvgA.d "M5 12h2l2 3l4-6l2 3h2" ] []
         ]
 
 
-close : Int -> Html msg
-close size =
-    icon size
-        [ Svg.path [ SvgA.d "M18 6L6 18" ] []
-        , Svg.path [ SvgA.d "M6 6l12 12" ] []
-        ]
-
-
-approveCheck : Int -> Html msg
-approveCheck size =
-    icon size
-        [ Svg.path [ SvgA.d "M22 11.08V12a10 10 0 1 1-5.93-9.14" ] []
-        , Svg.path [ SvgA.d "M22 4L12 14.01l-3-3" ] []
-        ]
-
-
-editPencil : Html msg
-editPencil =
-    icon 16
-        [ Svg.path [ SvgA.d "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" ] []
-        , Svg.path [ SvgA.d "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" ] []
-        ]
-
-
-deleteTrash : Int -> Html msg
-deleteTrash size =
-    icon size
-        [ Svg.path [ SvgA.d "M3 6h18" ] []
-        , Svg.path [ SvgA.d "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" ] []
-        ]
-
-
-
--- INTERNAL
-
-
-icon : Int -> List (Svg.Svg msg) -> Html msg
-icon size =
-    iconWithClass size ""
-
-
-iconWithClass : Int -> String -> List (Svg.Svg msg) -> Html msg
-iconWithClass size cls children =
-    let
-        sizeStr =
-            String.fromInt size
-
-        baseAttrs =
-            [ SvgA.viewBox "0 0 24 24"
-            , SvgA.width sizeStr
-            , SvgA.height sizeStr
-            , SvgA.fill "none"
-            , SvgA.stroke "currentColor"
-            , SvgA.strokeWidth "2"
-            , SvgA.strokeLinecap "round"
-            , SvgA.strokeLinejoin "round"
+viewDashboard : Model -> Html Msg
+viewDashboard model =
+    div [ class "min-h-screen bg-surface-primary" ]
+        [ div [ class "page-container" ]
+            [ viewDashboardHeader model
+            , viewDashboardError model.dashboardError
+            , viewAppointmentsTable model.appointments
             ]
+        , viewEditModal model.editModal
+        ]
 
-        attrs =
-            if cls == "" then
-                baseAttrs
+
+viewEditModal : Maybe EditModalState -> Html Msg
+viewEditModal maybeState =
+    case maybeState of
+        Nothing ->
+            text ""
+
+        Just state ->
+            div [ class "modal-overlay z-50" ]
+                [ div [ class "modal-card max-w-lg w-full mx-4" ]
+                    [ viewEditModalHeader
+                    , viewEditModalError state.error
+                    , viewEditModalForm state
+                    , viewEditModalFooter state.saving
+                    ]
+                ]
+
+
+viewEditModalHeader : Html Msg
+viewEditModalHeader =
+    div [ class "flex justify-between items-center mb-4" ]
+        [ h2 [ class "text-xl font-semibold text-foreground-primary" ]
+            [ text "Edit Appointment" ]
+        , button
+            [ class "btn-icon text-foreground-muted hover:text-foreground-primary"
+            , onClick CloseEditModal
+            ]
+            [ Svg.svg
+                [ SvgA.viewBox "0 0 24 24", SvgA.width "18", SvgA.height "18", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
+                [ Svg.path [ SvgA.d "M18 6L6 18" ] []
+                , Svg.path [ SvgA.d "M6 6l12 12" ] []
+                ]
+            ]
+        ]
+
+
+viewEditModalError : Maybe String -> Html Msg
+viewEditModalError maybeError =
+    case maybeError of
+        Just error ->
+            div [ class "bg-danger-light border border-danger rounded-input p-3 mb-4" ]
+                [ p [ class "text-danger text-sm" ] [ text error ] ]
+
+        Nothing ->
+            text ""
+
+
+viewEditModalForm : EditModalState -> Html Msg
+viewEditModalForm state =
+    div [ class "flex flex-col gap-4" ]
+        [ viewEditField "name" "Full Name *" "text" state.name
+        , viewEditField "dateTime" "Appointment Date & Time *" "datetime-local" state.dateTime
+        , div [ class "flex flex-col gap-1" ]
+            [ label [ class "input-label" ] [ text "Description *" ]
+            , textarea
+                [ class "input-textarea"
+                , value state.description
+                , onInput (EditField "description")
+                ]
+                []
+            ]
+        , viewEditField "contactNumber" "Contact Number *" "tel" state.contactNumber
+        , viewEditField "email" "Email Address *" "email" state.email
+        ]
+
+
+viewEditField : String -> String -> String -> String -> Html Msg
+viewEditField fieldName labelText inputType fieldValue =
+    div [ class "flex flex-col gap-1" ]
+        [ label [ class "input-label" ] [ text labelText ]
+        , input
+            [ class "input-field-filled"
+            , type_ inputType
+            , value fieldValue
+            , onInput (EditField fieldName)
+            ]
+            []
+        ]
+
+
+viewEditModalFooter : Bool -> Html Msg
+viewEditModalFooter saving =
+    div [ class "flex justify-end gap-3 mt-6" ]
+        [ button
+            [ class "btn-secondary"
+            , onClick CloseEditModal
+            ]
+            [ text "Cancel" ]
+        , button
+            [ class
+                ("btn-primary"
+                    ++ (if saving then
+                            " opacity-75 cursor-not-allowed"
+
+                        else
+                            ""
+                       )
+                )
+            , onClick SaveEdit
+            , disabled saving
+            ]
+            [ text
+                (if saving then
+                    "Saving..."
+
+                 else
+                    "Save Changes"
+                )
+            ]
+        ]
+
+
+viewDashboardHeader : Model -> Html Msg
+viewDashboardHeader model =
+    div [ class "flex justify-between items-center" ]
+        [ h1 [ class "text-2xl font-bold text-foreground-primary" ]
+            [ text "Appointments" ]
+        , span [ class "badge-count" ]
+            [ text (String.fromInt model.totalCount ++ " appointments") ]
+        ]
+
+
+viewDashboardError : Maybe String -> Html Msg
+viewDashboardError maybeError =
+    case maybeError of
+        Just error ->
+            div [ class "bg-danger-light border border-danger rounded-input p-3" ]
+                [ p [ class "text-danger text-sm" ] [ text error ] ]
+
+        Nothing ->
+            text ""
+
+
+viewAppointmentsTable : List Appointment -> Html Msg
+viewAppointmentsTable appointments =
+    div [ class "bg-white rounded-card border border-gray-200 overflow-hidden" ]
+        [ table [ class "w-full" ]
+            [ thead []
+                [ tr [ class "bg-surface-primary text-xs font-bold text-foreground-secondary uppercase border-b border-gray-200" ]
+                    [ th [ class "text-left px-4 py-3 w-36" ] [ text "Name" ]
+                    , th [ class "text-left px-4 py-3 w-40" ] [ text "Date & Time" ]
+                    , th [ class "text-left px-4 py-3" ] [ text "Description" ]
+                    , th [ class "text-left px-4 py-3 w-32" ] [ text "Phone" ]
+                    , th [ class "text-left px-4 py-3 w-44" ] [ text "Email" ]
+                    , th [ class "text-center px-4 py-3 w-28" ] [ text "Actions" ]
+                    ]
+                ]
+            , tbody [] (List.map viewTableRow appointments)
+            ]
+        ]
+
+
+viewTableRow : Appointment -> Html Msg
+viewTableRow appointment =
+    let
+        rowClass =
+            if appointment.status == "approved" then
+                "bg-approved border-b border-gray-100"
 
             else
-                baseAttrs ++ [ SvgA.class cls ]
+                "bg-white border-b border-gray-100"
     in
-    Svg.svg attrs children
+    tr [ class rowClass ]
+        [ td [ class "px-4 py-3 text-sm text-foreground-primary" ]
+            [ text appointment.name ]
+        , td [ class "px-4 py-3 text-data text-xs text-foreground-primary" ]
+            [ text (formatDateTime appointment.dateTime) ]
+        , td [ class "px-4 py-3 text-sm text-foreground-secondary" ]
+            [ text appointment.description ]
+        , td [ class "px-4 py-3 text-data text-xs text-foreground-secondary" ]
+            [ text appointment.contactNumber ]
+        , td [ class "px-4 py-3 text-data text-xs text-foreground-secondary" ]
+            [ text appointment.email ]
+        , td [ class "px-4 py-3 text-center" ]
+            [ div [ class "flex justify-center gap-2" ]
+                [ viewApproveIcon appointment
+                , viewEditIcon appointment
+                , viewDeleteIcon appointment
+                ]
+            ]
+        ]
+
+
+viewApproveIcon : Appointment -> Html Msg
+viewApproveIcon appointment =
+    let
+        colour =
+            if appointment.status == "approved" then
+                "text-accent-primary"
+
+            else
+                "text-foreground-muted hover:text-accent-primary"
+    in
+    button
+        [ class ("btn-icon " ++ colour)
+        , onClick (OpenApproveModal appointment)
+        ]
+        [ Svg.svg
+            [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
+            [ Svg.path [ SvgA.d "M22 11.08V12a10 10 0 1 1-5.93-9.14" ] []
+            , Svg.path [ SvgA.d "M22 4L12 14.01l-3-3" ] []
+            ]
+        ]
+
+
+viewEditIcon : Appointment -> Html Msg
+viewEditIcon appointment =
+    button
+        [ class "btn-icon text-foreground-muted hover:text-foreground-primary"
+        , onClick (OpenEditModal appointment)
+        ]
+        [ Svg.svg
+            [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
+            [ Svg.path [ SvgA.d "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" ] []
+            , Svg.path [ SvgA.d "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" ] []
+            ]
+        ]
+
+
+viewDeleteIcon : Appointment -> Html Msg
+viewDeleteIcon appointment =
+    button
+        [ class "btn-icon text-danger hover:opacity-75"
+        , onClick (OpenDeleteModal appointment)
+        ]
+        [ Svg.svg
+            [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
+            [ Svg.path [ SvgA.d "M3 6h18" ] []
+            , Svg.path [ SvgA.d "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" ] []
+            ]
+        ]
+
+
+formatDateTime : String -> String
+formatDateTime iso =
+    -- Display the first 16 chars of ISO string (YYYY-MM-DDTHH:MM)
+    String.left 16 iso |> String.replace "T" " "
+
+
+viewNotFound : Html Msg
+viewNotFound =
+    div [ class "min-h-screen bg-surface-primary flex items-center justify-center" ]
+        [ h1 [ class "text-xl text-foreground-muted" ] [ text "Page not found" ] ]
+
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Sub.none
+
+
+
+-- MAIN
+
+
+main : Program Flags Model Msg
+main =
+    Browser.application
+        { init = init
+        , view = view
+        , update = update
+        , subscriptions = subscriptions
+        , onUrlRequest = UrlRequested
+        , onUrlChange = UrlChanged
+        }
