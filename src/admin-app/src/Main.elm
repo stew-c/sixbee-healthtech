@@ -1,4 +1,4 @@
-port module Main exposing (LoginResponse, LoginState(..), Model, Msg(..), Page(..), init, main, update)
+port module Main exposing (EditModalState, LoginResponse, LoginState(..), Model, Msg(..), Page(..), init, main, update)
 
 import Browser
 import Browser.Navigation as Nav
@@ -81,6 +81,10 @@ type alias Model =
     , pageSize : Int
     , dashboardError : Maybe String
     , editModal : Maybe EditModalState
+    , approveModal : Maybe Appointment
+    , approving : Bool
+    , deleteModal : Maybe Appointment
+    , deleting : Bool
     }
 
 
@@ -114,7 +118,13 @@ type Msg
     | EditField String String
     | SaveEdit
     | GotSaveEditResponse (Result Http.Error ())
+    | CloseApproveModal
+    | ConfirmApprove
+    | GotApproveResponse (Result Http.Error ())
     | OpenDeleteModal Appointment
+    | CloseDeleteModal
+    | ConfirmDelete
+    | GotDeleteResponse (Result Http.Error ())
     | Logout
     | NoOp
 
@@ -192,6 +202,10 @@ init flags url key =
       , pageSize = 10
       , dashboardError = Nothing
       , editModal = Nothing
+      , approveModal = Nothing
+      , approving = False
+      , deleteModal = Nothing
+      , deleting = False
       }
     , Cmd.batch [ initialCmd, fetchCmd ]
     )
@@ -253,6 +267,42 @@ fetchAppointments session page pageSize =
         Nothing ->
             Cmd.none
 
+
+
+deleteAppointment : Session -> String -> Cmd Msg
+deleteAppointment session appointmentId =
+    case Session.getToken session of
+        Just token ->
+            Http.request
+                { method = "DELETE"
+                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/appointments/" ++ appointmentId
+                , body = Http.emptyBody
+                , expect = Http.expectWhatever GotDeleteResponse
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            Cmd.none
+
+
+approveAppointment : Session -> String -> Cmd Msg
+approveAppointment session appointmentId =
+    case Session.getToken session of
+        Just token ->
+            Http.request
+                { method = "PATCH"
+                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/appointments/" ++ appointmentId ++ "/approve"
+                , body = Http.emptyBody
+                , expect = Http.expectWhatever GotApproveResponse
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            Cmd.none
 
 
 saveAppointment : Session -> EditModalState -> Cmd Msg
@@ -403,9 +453,31 @@ update msg model =
                 _ ->
                     ( { model | dashboardError = Just "Failed to load appointments." }, Cmd.none )
 
-        OpenApproveModal _ ->
-            -- TODO: Component 15
-            ( model, Cmd.none )
+        OpenApproveModal appointment ->
+            ( { model | approveModal = Just appointment, approving = False }, Cmd.none )
+
+        CloseApproveModal ->
+            ( { model | approveModal = Nothing, approving = False }, Cmd.none )
+
+        ConfirmApprove ->
+            case model.approveModal of
+                Just appointment ->
+                    ( { model | approving = True }
+                    , approveAppointment model.session appointment.id
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotApproveResponse (Ok _) ->
+            ( { model | approveModal = Nothing, approving = False }
+            , fetchAppointments model.session model.currentPage model.pageSize
+            )
+
+        GotApproveResponse (Err _) ->
+            ( { model | approveModal = Nothing, approving = False, dashboardError = Just "Failed to approve appointment." }
+            , fetchAppointments model.session model.currentPage model.pageSize
+            )
 
         OpenEditModal appointment ->
             ( { model
@@ -491,9 +563,31 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        OpenDeleteModal _ ->
-            -- TODO: Component 16
-            ( model, Cmd.none )
+        OpenDeleteModal appointment ->
+            ( { model | deleteModal = Just appointment, deleting = False }, Cmd.none )
+
+        CloseDeleteModal ->
+            ( { model | deleteModal = Nothing, deleting = False }, Cmd.none )
+
+        ConfirmDelete ->
+            case model.deleteModal of
+                Just appointment ->
+                    ( { model | deleting = True }
+                    , deleteAppointment model.session appointment.id
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        GotDeleteResponse (Ok _) ->
+            ( { model | deleteModal = Nothing, deleting = False }
+            , fetchAppointments model.session model.currentPage model.pageSize
+            )
+
+        GotDeleteResponse (Err _) ->
+            ( { model | deleteModal = Nothing, deleting = False, dashboardError = Just "Failed to delete appointment." }
+            , fetchAppointments model.session model.currentPage model.pageSize
+            )
 
         Logout ->
             ( { model
@@ -646,6 +740,8 @@ viewDashboard model =
             , viewAppointmentsTable model.appointments
             ]
         , viewEditModal model.editModal
+        , viewApproveModal model.approveModal model.approving
+        , viewDeleteModal model.deleteModal model.deleting
         ]
 
 
@@ -758,6 +854,114 @@ viewEditModalFooter saving =
                 )
             ]
         ]
+
+
+viewApproveModal : Maybe Appointment -> Bool -> Html Msg
+viewApproveModal maybeAppointment approving =
+    case maybeAppointment of
+        Nothing ->
+            text ""
+
+        Just appointment ->
+            div [ class "modal-overlay z-50" ]
+                [ div [ class "modal-card max-w-sm w-full mx-4 text-center" ]
+                    [ div [ class "flex flex-col items-center gap-3 mb-4" ]
+                        [ div [ class "w-12 h-12 bg-approved rounded-full flex items-center justify-center" ]
+                            [ Svg.svg
+                                [ SvgA.viewBox "0 0 24 24", SvgA.width "22", SvgA.height "22", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round", SvgA.class "text-accent-primary" ]
+                                [ Svg.path [ SvgA.d "M22 11.08V12a10 10 0 1 1-5.93-9.14" ] []
+                                , Svg.path [ SvgA.d "M22 4L12 14.01l-3-3" ] []
+                                ]
+                            ]
+                        , h2 [ class "text-lg font-bold text-foreground-primary" ]
+                            [ text "Approve Appointment" ]
+                        , p [ class "text-sm text-foreground-secondary" ]
+                            [ text ("Are you sure you want to approve the appointment for " ++ appointment.name ++ " on " ++ formatDateTime appointment.dateTime ++ "?") ]
+                        ]
+                    , div [ class "flex gap-3 justify-center" ]
+                        [ button
+                            [ class "btn-secondary"
+                            , onClick CloseApproveModal
+                            ]
+                            [ text "Cancel" ]
+                        , button
+                            [ class
+                                ("btn-primary"
+                                    ++ (if approving then
+                                            " opacity-75 cursor-not-allowed"
+
+                                        else
+                                            ""
+                                       )
+                                )
+                            , onClick ConfirmApprove
+                            , disabled approving
+                            ]
+                            [ text
+                                (if approving then
+                                    "Approving..."
+
+                                 else
+                                    "Approve"
+                                )
+                            ]
+                        ]
+                    ]
+                ]
+
+
+viewDeleteModal : Maybe Appointment -> Bool -> Html Msg
+viewDeleteModal maybeAppointment deleting =
+    case maybeAppointment of
+        Nothing ->
+            text ""
+
+        Just appointment ->
+            div [ class "modal-overlay z-50" ]
+                [ div [ class "modal-card max-w-sm w-full mx-4 text-center" ]
+                    [ div [ class "flex flex-col items-center gap-3 mb-4" ]
+                        [ div [ class "w-12 h-12 bg-danger-light rounded-full flex items-center justify-center" ]
+                            [ Svg.svg
+                                [ SvgA.viewBox "0 0 24 24", SvgA.width "22", SvgA.height "22", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round", SvgA.class "text-danger" ]
+                                [ Svg.path [ SvgA.d "M3 6h18" ] []
+                                , Svg.path [ SvgA.d "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" ] []
+                                ]
+                            ]
+                        , h2 [ class "text-lg font-bold text-foreground-primary" ]
+                            [ text "Delete Appointment" ]
+                        , p [ class "text-sm text-foreground-secondary" ]
+                            [ text ("Are you sure you want to delete the appointment for " ++ appointment.name ++ "? This action cannot be undone.") ]
+                        ]
+                    , div [ class "flex gap-3 justify-center" ]
+                        [ button
+                            [ class "btn-secondary"
+                            , onClick CloseDeleteModal
+                            ]
+                            [ text "Cancel" ]
+                        , button
+                            [ class
+                                ("btn-danger"
+                                    ++ (if deleting then
+                                            " opacity-75 cursor-not-allowed"
+
+                                        else
+                                            ""
+                                       )
+                                )
+                            , onClick ConfirmDelete
+                            , disabled deleting
+                            ]
+                            [ text
+                                (if deleting then
+                                    "Deleting..."
+
+                                 else
+                                    "Delete"
+                                )
+                            ]
+                        ]
+                    ]
+                ]
 
 
 viewDashboardHeader : Model -> Html Msg
