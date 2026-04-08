@@ -23,7 +23,7 @@ public class AppointmentServiceTests
             Description = "Existing appointment",
             ContactNumber = "07700900000",
             Email = "existing@example.com",
-            Status = "pending",
+            Status = AppointmentStatus.Pending,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
@@ -32,6 +32,13 @@ public class AppointmentServiceTests
         _repo.GetById(Arg.Is<Guid>(id => id != _knownId)).Returns((Appointment?)null);
         _repo.Create(Arg.Any<Appointment>()).Returns(c => c.Arg<Appointment>());
         _repo.Update(Arg.Any<Appointment>()).Returns(c => c.Arg<Appointment>());
+        _repo.UpdateStatus(_knownId, Arg.Any<string>()).Returns(c =>
+        {
+            _existingAppointment.Status = c.ArgAt<string>(1);
+            return _existingAppointment;
+        });
+        _repo.Delete(_knownId).Returns(1);
+        _repo.Delete(Arg.Is<Guid>(id => id != _knownId)).Returns(0);
     }
 
     private static Appointment ValidAppointment() => new()
@@ -97,6 +104,33 @@ public class AppointmentServiceTests
         appt.Description = "";
         var ex = await Assert.ThrowsAsync<ValidationException>(() => _service.Create(appt));
         Assert.Contains(ex.Errors, e => e.Field == "Description");
+    }
+
+    [Fact]
+    public async Task Create_WithNameExceeding255Characters_ThrowsValidationException()
+    {
+        var appt = ValidAppointment();
+        appt.Name = new string('a', 256);
+        var ex = await Assert.ThrowsAsync<ValidationException>(() => _service.Create(appt));
+        Assert.Contains(ex.Errors, e => e.Field == "Name" && e.Message.Contains("255"));
+    }
+
+    [Fact]
+    public async Task Create_WithDescriptionExceeding255Characters_ThrowsValidationException()
+    {
+        var appt = ValidAppointment();
+        appt.Description = new string('a', 256);
+        var ex = await Assert.ThrowsAsync<ValidationException>(() => _service.Create(appt));
+        Assert.Contains(ex.Errors, e => e.Field == "Description" && e.Message.Contains("255"));
+    }
+
+    [Fact]
+    public async Task Create_WithEmailExceeding255Characters_ThrowsValidationException()
+    {
+        var appt = ValidAppointment();
+        appt.Email = new string('a', 244) + "@example.com";
+        var ex = await Assert.ThrowsAsync<ValidationException>(() => _service.Create(appt));
+        Assert.Contains(ex.Errors, e => e.Field == "Email" && e.Message.Contains("255"));
     }
 
     // Create tests
@@ -174,7 +208,7 @@ public class AppointmentServiceTests
 
         Assert.NotNull(result);
         Assert.Equal("Updated Name", result!.Name);
-        Assert.Equal("pending", result.Status);
+        Assert.Equal(AppointmentStatus.Pending, result.Status);
         await _repo.Received(1).Update(Arg.Any<Appointment>());
     }
 
@@ -204,18 +238,18 @@ public class AppointmentServiceTests
         var result = await _service.Approve(_knownId);
 
         Assert.NotNull(result);
-        await _repo.Received(1).UpdateStatus(_knownId, "approved");
+        await _repo.Received(1).UpdateStatus(_knownId, AppointmentStatus.Approved);
     }
 
     [Fact]
     public async Task Approve_AlreadyApproved_ReturnsExistingEntity_UpdateStatusNotCalled()
     {
-        _existingAppointment.Status = "approved";
+        _existingAppointment.Status = AppointmentStatus.Approved;
 
         var result = await _service.Approve(_knownId);
 
         Assert.NotNull(result);
-        Assert.Equal("approved", result!.Status);
+        Assert.Equal(AppointmentStatus.Approved, result!.Status);
         await _repo.DidNotReceive().UpdateStatus(Arg.Any<Guid>(), Arg.Any<string>());
     }
 
@@ -238,11 +272,10 @@ public class AppointmentServiceTests
     }
 
     [Fact]
-    public async Task Delete_WhenNotFound_DoesNotCallRepositoryDelete_ReturnsFalse()
+    public async Task Delete_WhenNotFound_ReturnsFalse()
     {
         var result = await _service.Delete(Guid.NewGuid());
 
         Assert.False(result);
-        await _repo.DidNotReceive().Delete(Arg.Any<Guid>());
     }
 }

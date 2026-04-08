@@ -6,6 +6,6 @@ public interface IAppointmentRepository
     Task<Appointment?> GetById(Guid id);
     Task<(IEnumerable<Appointment> Items, int TotalCount)> GetAll(int page, int pageSize);
     Task<Appointment> Update(Appointment appointment);
-    Task UpdateStatus(Guid id, string status);
-    Task Delete(Guid id);
+    Task<Appointment?> UpdateStatus(Guid id, string status);
+    Task<int> Delete(Guid id);
 }
