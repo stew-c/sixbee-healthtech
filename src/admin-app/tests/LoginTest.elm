@@ -2,7 +2,7 @@ module LoginTest exposing (..)
 
 import Expect
 import Http
-import Main exposing (LoginResponse, LoginState(..), Msg(..))
+import Page.Login exposing (LoginResponse, State(..))
 import Test exposing (..)
 
 
@@ -49,7 +49,7 @@ suite =
 
 {-| Mimics the SubmitLogin validation logic from Main.update
 -}
-validateLogin : String -> String -> LoginState
+validateLogin : String -> String -> State
 validateLogin email password =
     if String.trim email == "" || String.trim password == "" then
         LoginError "Email and password are required"
@@ -60,7 +60,7 @@ validateLogin email password =
 
 {-| Mimics the GotLoginResponse handler from Main.update — returns the loginState
 -}
-handleLoginResponse : Result Http.Error LoginResponse -> LoginState
+handleLoginResponse : Result Http.Error LoginResponse -> State
 handleLoginResponse result =
     case result of
         Ok _ ->
@@ -75,7 +75,7 @@ handleLoginResponse result =
                     LoginError "Something went wrong. Please try again."
 
 
-isLoginError : LoginState -> Bool
+isLoginError : State -> Bool
 isLoginError state =
     case state of
         LoginError _ ->
