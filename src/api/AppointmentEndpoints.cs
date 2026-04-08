@@ -18,8 +18,8 @@ public static class AppointmentEndpoints
 
         group.MapGet("/", async (int? page, int? pageSize, IAppointmentService service) =>
         {
-            var p = page ?? 1;
-            var ps = pageSize ?? 10;
+            var p = Math.Max(1, page ?? 1);
+            var ps = Math.Clamp(pageSize ?? 10, 1, 100);
             var (items, totalCount) = await service.GetAll(p, ps);
             return Results.Ok(new AppointmentListResponse(items.Select(ToResponse), totalCount, p, ps));
         });

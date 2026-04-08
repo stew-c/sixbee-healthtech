@@ -1,4 +1,5 @@
 using Npgsql;
+using SixBee.Appointments;
 
 namespace SixBee.Appointments.Data.Tests;
 
@@ -44,7 +45,7 @@ public class AppointmentRepositoryTests : IAsyncLifetime
         var result = await _repo.Create(input);
 
         Assert.NotEqual(Guid.Empty, result.Id);
-        Assert.Equal("pending", result.Status);
+        Assert.Equal(AppointmentStatus.Pending, result.Status);
         Assert.NotEqual(default, result.CreatedAt);
         Assert.NotEqual(default, result.UpdatedAt);
         Assert.Equal(input.Name, result.Name);
@@ -118,14 +119,14 @@ public class AppointmentRepositoryTests : IAsyncLifetime
     public async Task UpdateStatus_ChangesStatusAndAdvancesUpdatedAt()
     {
         var created = await _repo.Create(MakeAppointment());
-        Assert.Equal("pending", created.Status);
+        Assert.Equal(AppointmentStatus.Pending, created.Status);
         await Task.Delay(50);
 
-        await _repo.UpdateStatus(created.Id, "approved");
+        await _repo.UpdateStatus(created.Id, AppointmentStatus.Approved);
 
         var result = await _repo.GetById(created.Id);
         Assert.NotNull(result);
-        Assert.Equal("approved", result.Status);
+        Assert.Equal(AppointmentStatus.Approved, result.Status);
         Assert.True(result.UpdatedAt >= created.UpdatedAt);
         Assert.Equal(created.Name, result.Name);
     }

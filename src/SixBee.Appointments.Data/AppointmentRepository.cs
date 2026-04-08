@@ -66,19 +66,21 @@ public class AppointmentRepository : IAppointmentRepository
         return (await GetById(appointment.Id))!;
     }
 
-    public async Task UpdateStatus(Guid id, string status)
+    public async Task<Appointment?> UpdateStatus(Guid id, string status)
     {
         using var db = CreateQueryFactory();
-        await db.Query("appointment").Where("Id", id).UpdateAsync(new
+        var affected = await db.Query("appointment").Where("Id", id).UpdateAsync(new
         {
             Status = status,
             UpdatedAt = DateTimeOffset.UtcNow
         });
+        if (affected == 0) return null;
+        return await db.Query("appointment").Where("Id", id).FirstOrDefaultAsync<Appointment>();
     }
 
-    public async Task Delete(Guid id)
+    public async Task<int> Delete(Guid id)
     {
         using var db = CreateQueryFactory();
-        await db.Query("appointment").Where("Id", id).DeleteAsync();
+        return await db.Query("appointment").Where("Id", id).DeleteAsync();
     }
 }

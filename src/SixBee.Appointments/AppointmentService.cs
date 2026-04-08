@@ -3,7 +3,7 @@ using SixBee.Core;
 
 namespace SixBee.Appointments;
 
-public class AppointmentService : IAppointmentService
+public partial class AppointmentService : IAppointmentService
 {
     private readonly IAppointmentRepository _appointmentRepository;
 
@@ -18,26 +18,38 @@ public class AppointmentService : IAppointmentService
 
         if (string.IsNullOrWhiteSpace(appointment.Name))
             errors.Add(new ValidationError("Name", "Name is required"));
+        else if (appointment.Name.Length > 255)
+            errors.Add(new ValidationError("Name", "Name must be 255 characters or fewer"));
 
         if (appointment.DateTime == default)
             errors.Add(new ValidationError("DateTime", "Date and time is required"));
 
         if (string.IsNullOrWhiteSpace(appointment.Description))
             errors.Add(new ValidationError("Description", "Description is required"));
+        else if (appointment.Description.Length > 255)
+            errors.Add(new ValidationError("Description", "Description must be 255 characters or fewer"));
 
         if (string.IsNullOrWhiteSpace(appointment.ContactNumber))
             errors.Add(new ValidationError("ContactNumber", "Contact number is required"));
-        else if (!Regex.IsMatch(appointment.ContactNumber, @"^07\d{9}$"))
+        else if (!UkMobileRegex().IsMatch(appointment.ContactNumber))
             errors.Add(new ValidationError("ContactNumber", "Contact number format is invalid"));
 
         if (string.IsNullOrWhiteSpace(appointment.Email))
             errors.Add(new ValidationError("Email", "Email is required"));
-        else if (!Regex.IsMatch(appointment.Email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+        else if (appointment.Email.Length > 255)
+            errors.Add(new ValidationError("Email", "Email must be 255 characters or fewer"));
+        else if (!EmailRegex().IsMatch(appointment.Email))
             errors.Add(new ValidationError("Email", "Email format is invalid"));
 
         if (errors.Count > 0)
             throw new ValidationException(errors);
     }
+
+    [GeneratedRegex(@"^07\d{9}$")]
+    private static partial Regex UkMobileRegex();
+
+    [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
+    private static partial Regex EmailRegex();
 
     public async Task<Appointment> Create(Appointment appointment)
     {
@@ -82,20 +94,15 @@ public class AppointmentService : IAppointmentService
         if (appointment is null)
             return null;
 
-        if (appointment.Status == "approved")
+        if (appointment.Status == AppointmentStatus.Approved)
             return appointment;
 
-        await _appointmentRepository.UpdateStatus(id, "approved");
-        return await _appointmentRepository.GetById(id);
+        return await _appointmentRepository.UpdateStatus(id, AppointmentStatus.Approved);
     }
 
     public async Task<bool> Delete(Guid id)
     {
-        var appointment = await _appointmentRepository.GetById(id);
-        if (appointment is null)
-            return false;
-
-        await _appointmentRepository.Delete(id);
-        return true;
+        var affected = await _appointmentRepository.Delete(id);
+        return affected > 0;
     }
 }

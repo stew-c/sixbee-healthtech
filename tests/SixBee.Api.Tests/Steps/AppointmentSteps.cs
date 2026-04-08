@@ -23,7 +23,7 @@ public class AppointmentSteps : IClassFixture<TestApiFactory>
         _client.DefaultRequestHeaders.Add("Authorization", "Bearer test-token");
     }
 
-    private static Appointment MakeAppointment(string name = "Test Patient", string status = "pending") => new()
+    private static Appointment MakeAppointment(string name = "Test Patient", string status = AppointmentStatus.Pending) => new()
     {
         Id = Guid.NewGuid(),
         Name = name,
@@ -144,7 +144,7 @@ public class AppointmentSteps : IClassFixture<TestApiFactory>
     {
         var approved = MakeAppointment();
         approved.Id = _knownId;
-        approved.Status = "approved";
+        approved.Status = AppointmentStatus.Approved;
         _factory.MockAppointmentService.Approve(_knownId).Returns(approved);
 
         var response = await _client.PatchAsync($"/api/appointments/{_knownId}/approve", null);

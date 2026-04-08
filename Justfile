@@ -24,8 +24,8 @@ test: test-unit test-integration test-bdd test-elm
 
 # Run unit tests only (no database required)
 test-unit:
-    dotnet test tests/SixBee.Auth.Tests
     dotnet test tests/SixBee.Appointments.Tests
+    dotnet test tests/SixBee.Auth.Tests
 
 # Run integration tests (starts db, runs tests, stops db)
 test-integration:
@@ -37,8 +37,8 @@ test-integration:
     docker compose down
     [ $r1 -eq 0 ] && [ $r2 -eq 0 ]
 
-# Run BDD integration tests (starts db + api, runs tests, stops all)
-test-bdd:
+# Run BDD integration tests (builds images, starts db + api, runs tests, stops all)
+test-bdd: publish
     #!/usr/bin/env bash
     set -uo pipefail
     docker compose up db api -d --wait
