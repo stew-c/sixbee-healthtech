@@ -1,4 +1,4 @@
-port module Main exposing (main)
+port module Main exposing (LoginResponse, LoginState(..), Model, Msg(..), Page(..), init, main, update)
 
 import Browser
 import Browser.Navigation as Nav
@@ -7,9 +7,11 @@ import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, v
 import Html.Events exposing (onInput, onSubmit)
 import Svg
 import Svg.Attributes as SvgA
+import Appointment exposing (Appointment, AppointmentListResponse, appointmentListResponseDecoder)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Session exposing (Session)
 import Url
 import Url.Parser as Parser exposing (Parser)
 
@@ -25,14 +27,7 @@ port clearSession : () -> Cmd msg
 
 
 type alias Flags =
-    Maybe SessionData
-
-
-type alias SessionData =
-    { token : String
-    , expiresAt : String
-    , email : String
-    }
+    Decode.Value
 
 
 
@@ -76,10 +71,15 @@ type LoginState
 type alias Model =
     { key : Nav.Key
     , page : Page
-    , session : Maybe SessionData
+    , session : Session
     , email : String
     , password : String
     , loginState : LoginState
+    , appointments : List Appointment
+    , totalCount : Int
+    , currentPage : Int
+    , pageSize : Int
+    , dashboardError : Maybe String
     }
 
 
@@ -94,6 +94,8 @@ type Msg
     | UpdatePassword String
     | SubmitLogin
     | GotLoginResponse (Result Http.Error LoginResponse)
+    | GotAppointments (Result Http.Error AppointmentListResponse)
+    | Logout
     | NoOp
 
 
@@ -107,35 +109,70 @@ type alias LoginResponse =
 -- INIT
 
 
+flagsDecoder : Decode.Decoder { token : String, expiresAt : String, email : String }
+flagsDecoder =
+    Decode.map3 (\t e em -> { token = t, expiresAt = e, email = em })
+        (Decode.field "token" Decode.string)
+        (Decode.field "expiresAt" Decode.string)
+        (Decode.field "email" Decode.string)
+
+
 init : Flags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
+        session =
+            case Decode.decodeValue flagsDecoder flags of
+                Ok data ->
+                    Session.login data.token data.expiresAt data.email
+
+                Err _ ->
+                    Session.LoggedOut
+
         page =
             urlToPage url
 
+        isAuthenticated =
+            Session.isLoggedIn session
+
         redirectedPage =
-            case ( flags, page ) of
-                ( Nothing, DashboardPage ) ->
+            case ( isAuthenticated, page ) of
+                ( False, DashboardPage ) ->
                     LoginPage
 
-                ( Just _, LoginPage ) ->
+                ( True, LoginPage ) ->
                     DashboardPage
 
                 _ ->
                     page
     in
+    let
+        initialCmd =
+            if redirectedPage /= page then
+                Nav.pushUrl key (pageToPath redirectedPage)
+
+            else
+                Cmd.none
+
+        fetchCmd =
+            if redirectedPage == DashboardPage then
+                fetchAppointments session 1 10
+
+            else
+                Cmd.none
+    in
     ( { key = key
       , page = redirectedPage
-      , session = flags
+      , session = session
       , email = ""
       , password = ""
       , loginState = Idle
+      , appointments = []
+      , totalCount = 0
+      , currentPage = 1
+      , pageSize = 10
+      , dashboardError = Nothing
       }
-    , if redirectedPage /= page then
-        Nav.pushUrl key (pageToPath redirectedPage)
-
-      else
-        Cmd.none
+    , Cmd.batch [ initialCmd, fetchCmd ]
     )
 
 
@@ -178,13 +215,22 @@ loginResponseDecoder =
         (Decode.field "expiresAt" Decode.string)
 
 
-encodeSessionData : SessionData -> Encode.Value
-encodeSessionData session =
-    Encode.object
-        [ ( "token", Encode.string session.token )
-        , ( "expiresAt", Encode.string session.expiresAt )
-        , ( "email", Encode.string session.email )
-        ]
+fetchAppointments : Session -> Int -> Int -> Cmd Msg
+fetchAppointments session page pageSize =
+    case Session.getToken session of
+        Just token ->
+            Http.request
+                { method = "GET"
+                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/appointments?page=" ++ String.fromInt page ++ "&pageSize=" ++ String.fromInt pageSize
+                , body = Http.emptyBody
+                , expect = Http.expectJson GotAppointments appointmentListResponseDecoder
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
+            Cmd.none
 
 
 
@@ -206,8 +252,19 @@ update msg model =
             let
                 page =
                     urlToPage url
+
+                isAuthenticated =
+                    Session.isLoggedIn model.session
             in
-            ( { model | page = page }, Cmd.none )
+            case ( isAuthenticated, page ) of
+                ( False, DashboardPage ) ->
+                    ( { model | page = LoginPage }, Nav.pushUrl model.key "/" )
+
+                ( True, LoginPage ) ->
+                    ( { model | page = DashboardPage }, Nav.pushUrl model.key "/dashboard" )
+
+                _ ->
+                    ( { model | page = page }, Cmd.none )
 
         UpdateEmail email ->
             ( { model | email = email, loginState = Idle }, Cmd.none )
@@ -226,21 +283,25 @@ update msg model =
 
         GotLoginResponse (Ok response) ->
             let
-                sessionData =
-                    { token = response.token
-                    , expiresAt = response.expiresAt
-                    , email = model.email
-                    }
+                session =
+                    Session.login response.token response.expiresAt model.email
             in
             ( { model
-                | session = Just sessionData
+                | session = session
                 , loginState = Idle
                 , password = ""
                 , page = DashboardPage
               }
             , Cmd.batch
-                [ saveSession (encodeSessionData sessionData)
+                [ saveSession
+                    (Encode.object
+                        [ ( "token", Encode.string response.token )
+                        , ( "expiresAt", Encode.string response.expiresAt )
+                        , ( "email", Encode.string model.email )
+                        ]
+                    )
                 , Nav.pushUrl model.key "/dashboard"
+                , fetchAppointments session 1 10
                 ]
             )
 
@@ -255,6 +316,46 @@ update msg model =
                             "Something went wrong. Please try again."
             in
             ( { model | loginState = LoginError message }, Cmd.none )
+
+        GotAppointments (Ok response) ->
+            ( { model
+                | appointments = response.items
+                , totalCount = response.totalCount
+                , currentPage = response.page
+                , dashboardError = Nothing
+              }
+            , Cmd.none
+            )
+
+        GotAppointments (Err err) ->
+            case err of
+                Http.BadStatus 401 ->
+                    ( { model
+                        | session = Session.logout model.session
+                        , page = LoginPage
+                      }
+                    , Cmd.batch
+                        [ clearSession ()
+                        , Nav.pushUrl model.key "/"
+                        ]
+                    )
+
+                _ ->
+                    ( { model | dashboardError = Just "Failed to load appointments." }, Cmd.none )
+
+        Logout ->
+            ( { model
+                | session = Session.logout model.session
+                , page = LoginPage
+                , email = ""
+                , password = ""
+                , loginState = Idle
+              }
+            , Cmd.batch
+                [ clearSession ()
+                , Nav.pushUrl model.key "/"
+                ]
+            )
 
         NoOp ->
             ( model, Cmd.none )
