@@ -31,7 +31,7 @@ Run `just` to see all available commands.
 
 ## Default Credentials
 
-The following admin account is seeded on first run. These are development-only credentials and must not be used in production.
+The following admin account is seeded on first run.
 
 | Field    | Value              |
 | -------- | ------------------ |
