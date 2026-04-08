@@ -5,8 +5,8 @@ import Browser.Navigation as Nav
 import Html exposing (Html, button, div, form, h1, h2, input, label, p, small, span, table, tbody, td, text, textarea, th, thead, tr)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
-import Svg
-import Svg.Attributes as SvgA
+import Icons
+import Api
 import Appointment exposing (Appointment, AppointmentListResponse, appointmentListResponseDecoder)
 import Http
 import Json.Decode as Decode
@@ -250,95 +250,56 @@ loginResponseDecoder =
 
 fetchAppointments : Session -> Int -> Int -> Cmd Msg
 fetchAppointments session page pageSize =
-    case Session.getToken session of
-        Just token ->
-            Http.request
-                { method = "GET"
-                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/appointments?page=" ++ String.fromInt page ++ "&pageSize=" ++ String.fromInt pageSize
-                , body = Http.emptyBody
-                , expect = Http.expectJson GotAppointments appointmentListResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            Cmd.none
-
+    Api.authGet session
+        { url = "/api/appointments?page=" ++ String.fromInt page ++ "&pageSize=" ++ String.fromInt pageSize
+        , expect = Http.expectJson GotAppointments appointmentListResponseDecoder
+        }
 
 
 deleteAppointment : Session -> String -> Cmd Msg
 deleteAppointment session appointmentId =
-    case Session.getToken session of
-        Just token ->
-            Http.request
-                { method = "DELETE"
-                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/appointments/" ++ appointmentId
-                , body = Http.emptyBody
-                , expect = Http.expectWhatever GotDeleteResponse
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            Cmd.none
+    Api.authDelete session
+        { url = "/api/appointments/" ++ appointmentId
+        , expect = Http.expectWhatever GotDeleteResponse
+        }
 
 
 approveAppointment : Session -> String -> Cmd Msg
 approveAppointment session appointmentId =
-    case Session.getToken session of
-        Just token ->
-            Http.request
-                { method = "PATCH"
-                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/appointments/" ++ appointmentId ++ "/approve"
-                , body = Http.emptyBody
-                , expect = Http.expectWhatever GotApproveResponse
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            Cmd.none
+    Api.authPatch session
+        { url = "/api/appointments/" ++ appointmentId ++ "/approve"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever GotApproveResponse
+        }
 
 
 saveAppointment : Session -> EditModalState -> Cmd Msg
 saveAppointment session state =
-    case Session.getToken session of
-        Just token ->
-            let
-                isoDateTime =
-                    if String.contains "Z" state.dateTime || String.contains "+" state.dateTime then
-                        state.dateTime
+    let
+        isoDateTime =
+            if String.contains "Z" state.dateTime || String.contains "+" state.dateTime then
+                state.dateTime
 
-                    else if String.length state.dateTime == 16 then
-                        state.dateTime ++ ":00Z"
+            else if String.length state.dateTime == 16 then
+                state.dateTime ++ ":00Z"
 
-                    else
-                        state.dateTime ++ "Z"
-            in
-            Http.request
-                { method = "PUT"
-                , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/appointments/" ++ state.appointment.id
-                , body =
-                    Http.jsonBody
-                        (Encode.object
-                            [ ( "name", Encode.string state.name )
-                            , ( "dateTime", Encode.string isoDateTime )
-                            , ( "description", Encode.string state.description )
-                            , ( "contactNumber", Encode.string state.contactNumber )
-                            , ( "email", Encode.string state.email )
-                            ]
-                        )
-                , expect = Http.expectWhatever GotSaveEditResponse
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            Cmd.none
+            else
+                state.dateTime ++ "Z"
+    in
+    Api.authPut session
+        { url = "/api/appointments/" ++ state.appointment.id
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "name", Encode.string state.name )
+                    , ( "dateTime", Encode.string isoDateTime )
+                    , ( "description", Encode.string state.description )
+                    , ( "contactNumber", Encode.string state.contactNumber )
+                    , ( "email", Encode.string state.email )
+                    ]
+                )
+        , expect = Http.expectWhatever GotSaveEditResponse
+        }
 
 
 
@@ -650,7 +611,7 @@ viewNavBar session =
         Just email ->
             div [ class "nav-bar" ]
                 [ div [ class "flex items-center gap-3" ]
-                    [ div [ class "text-surface-secondary" ] [ heartPulseIcon ]
+                    [ div [ class "text-surface-secondary" ] [ Icons.heartPulse ]
                     , span [ class "text-white font-semibold text-sm" ]
                         [ text "SixBee HealthTech" ]
                     ]
@@ -661,21 +622,11 @@ viewNavBar session =
                         [ class "flex items-center gap-1.5 h-8 px-3 bg-accent-primary text-white text-sm font-medium rounded-md cursor-pointer hover:opacity-90"
                         , onClick Logout
                         ]
-                        [ logoutIcon
+                        [ Icons.logout
                         , text "Logout"
                         ]
                     ]
                 ]
-
-
-logoutIcon : Html msg
-logoutIcon =
-    Svg.svg
-        [ SvgA.viewBox "0 0 24 24", SvgA.width "14", SvgA.height "14", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
-        [ Svg.path [ SvgA.d "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" ] []
-        , Svg.path [ SvgA.d "M16 17l5-5-5-5" ] []
-        , Svg.path [ SvgA.d "M21 12H9" ] []
-        ]
 
 
 viewLogin : Model -> Html Msg
@@ -689,7 +640,7 @@ viewLogin model =
             [ form [ class "bg-white rounded-modal shadow-lg p-8", onSubmit SubmitLogin ]
                 [ div [ class "flex flex-col items-center gap-2 mb-6" ]
                     [ div [ class "w-12 h-12 bg-surface-inverse rounded-card flex items-center justify-center" ]
-                        [ heartPulseIcon ]
+                        [ Icons.heartPulse ]
                     , h1 [ class "text-2xl font-bold text-foreground-primary" ]
                         [ text "Admin Login" ]
                     , p [ class "text-foreground-muted text-sm" ]
@@ -763,24 +714,6 @@ viewLoginError state =
             text ""
 
 
-heartPulseIcon : Html msg
-heartPulseIcon =
-    Svg.svg
-        [ SvgA.viewBox "0 0 24 24"
-        , SvgA.width "24"
-        , SvgA.height "24"
-        , SvgA.fill "none"
-        , SvgA.stroke "currentColor"
-        , SvgA.strokeWidth "2"
-        , SvgA.strokeLinecap "round"
-        , SvgA.strokeLinejoin "round"
-        , SvgA.class "text-foreground-inverse"
-        ]
-        [ Svg.path [ SvgA.d "M19.5 12.572l-7.5 7.428l-7.5-7.428A5 5 0 0 1 7.5 3.5c1.76 0 3.332.91 4.5 2.37C13.168 4.41 14.74 3.5 16.5 3.5a5 5 0 0 1 3 9.072z" ] []
-        , Svg.path [ SvgA.d "M5 12h2l2 3l4-6l2 3h2" ] []
-        ]
-
-
 viewDashboard : Model -> Html Msg
 viewDashboard model =
     div [ class "min-h-screen bg-surface-primary" ]
@@ -822,12 +755,7 @@ viewEditModalHeader =
             [ class "btn-icon text-foreground-muted hover:text-foreground-primary"
             , onClick CloseEditModal
             ]
-            [ Svg.svg
-                [ SvgA.viewBox "0 0 24 24", SvgA.width "18", SvgA.height "18", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
-                [ Svg.path [ SvgA.d "M18 6L6 18" ] []
-                , Svg.path [ SvgA.d "M6 6l12 12" ] []
-                ]
-            ]
+            [ Icons.close 18 ]
         ]
 
 
@@ -917,13 +845,8 @@ viewApproveModal maybeAppointment approving =
             div [ class "modal-overlay z-50" ]
                 [ div [ class "modal-card max-w-sm w-full mx-4 text-center" ]
                     [ div [ class "flex flex-col items-center gap-3 mb-4" ]
-                        [ div [ class "w-12 h-12 bg-approved rounded-full flex items-center justify-center" ]
-                            [ Svg.svg
-                                [ SvgA.viewBox "0 0 24 24", SvgA.width "22", SvgA.height "22", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round", SvgA.class "text-accent-primary" ]
-                                [ Svg.path [ SvgA.d "M22 11.08V12a10 10 0 1 1-5.93-9.14" ] []
-                                , Svg.path [ SvgA.d "M22 4L12 14.01l-3-3" ] []
-                                ]
-                            ]
+                        [ div [ class "w-12 h-12 bg-approved rounded-full flex items-center justify-center text-accent-primary" ]
+                            [ Icons.approveCheck 22 ]
                         , h2 [ class "text-lg font-bold text-foreground-primary" ]
                             [ text "Approve Appointment" ]
                         , p [ class "text-sm text-foreground-secondary" ]
@@ -971,13 +894,8 @@ viewDeleteModal maybeAppointment deleting =
             div [ class "modal-overlay z-50" ]
                 [ div [ class "modal-card max-w-sm w-full mx-4 text-center" ]
                     [ div [ class "flex flex-col items-center gap-3 mb-4" ]
-                        [ div [ class "w-12 h-12 bg-danger-light rounded-full flex items-center justify-center" ]
-                            [ Svg.svg
-                                [ SvgA.viewBox "0 0 24 24", SvgA.width "22", SvgA.height "22", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round", SvgA.class "text-danger" ]
-                                [ Svg.path [ SvgA.d "M3 6h18" ] []
-                                , Svg.path [ SvgA.d "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" ] []
-                                ]
-                            ]
+                        [ div [ class "w-12 h-12 bg-danger-light rounded-full flex items-center justify-center text-danger" ]
+                            [ Icons.deleteTrash 22 ]
                         , h2 [ class "text-lg font-bold text-foreground-primary" ]
                             [ text "Delete Appointment" ]
                         , p [ class "text-sm text-foreground-secondary" ]
@@ -1100,12 +1018,7 @@ viewApproveIcon appointment =
         [ class ("btn-icon " ++ colour)
         , onClick (OpenApproveModal appointment)
         ]
-        [ Svg.svg
-            [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
-            [ Svg.path [ SvgA.d "M22 11.08V12a10 10 0 1 1-5.93-9.14" ] []
-            , Svg.path [ SvgA.d "M22 4L12 14.01l-3-3" ] []
-            ]
-        ]
+        [ Icons.approveCheck 16 ]
 
 
 viewEditIcon : Appointment -> Html Msg
@@ -1114,12 +1027,7 @@ viewEditIcon appointment =
         [ class "btn-icon text-foreground-muted hover:text-foreground-primary"
         , onClick (OpenEditModal appointment)
         ]
-        [ Svg.svg
-            [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
-            [ Svg.path [ SvgA.d "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" ] []
-            , Svg.path [ SvgA.d "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" ] []
-            ]
-        ]
+        [ Icons.editPencil ]
 
 
 viewDeleteIcon : Appointment -> Html Msg
@@ -1128,12 +1036,7 @@ viewDeleteIcon appointment =
         [ class "btn-icon text-danger hover:opacity-75"
         , onClick (OpenDeleteModal appointment)
         ]
-        [ Svg.svg
-            [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none", SvgA.stroke "currentColor", SvgA.strokeWidth "2", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round" ]
-            [ Svg.path [ SvgA.d "M3 6h18" ] []
-            , Svg.path [ SvgA.d "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" ] []
-            ]
-        ]
+        [ Icons.deleteTrash 16 ]
 
 
 formatDateTime : String -> String
