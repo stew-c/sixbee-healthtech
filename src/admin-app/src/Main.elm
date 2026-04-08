@@ -1,10 +1,11 @@
-port module Main exposing (EditModalState, LoginResponse, LoginState(..), Model, Msg(..), Page(..), init, main, update)
+port module Main exposing (EditModalState, Field(..), LoginResponse, LoginState(..), Model, Msg(..), Page(..), init, main, update)
 
 import Browser
 import Browser.Navigation as Nav
 import Html exposing (Html, button, div, form, h1, h2, input, label, p, small, span, table, tbody, td, text, textarea, th, thead, tr)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
+import ConfirmModal
 import Icons
 import Api
 import Appointment exposing (Appointment, AppointmentListResponse, appointmentListResponseDecoder)
@@ -114,7 +115,7 @@ type Msg
     | OpenApproveModal Appointment
     | OpenEditModal Appointment
     | CloseEditModal
-    | EditField String String
+    | EditField Field String
     | SaveEdit
     | GotSaveEditResponse (Result Http.Error ())
     | CloseApproveModal
@@ -127,6 +128,14 @@ type Msg
     | PaginationMsg Pagination.Msg
     | Logout
     | NoOp
+
+
+type Field
+    = Name
+    | DateTime
+    | Description
+    | ContactNumber
+    | Email
 
 
 type alias LoginResponse =
@@ -467,23 +476,20 @@ update msg model =
                     let
                         updated =
                             case field of
-                                "name" ->
+                                Name ->
                                     { state | name = val }
 
-                                "dateTime" ->
+                                DateTime ->
                                     { state | dateTime = val }
 
-                                "description" ->
+                                Description ->
                                     { state | description = val }
 
-                                "contactNumber" ->
+                                ContactNumber ->
                                     { state | contactNumber = val }
 
-                                "email" ->
+                                Email ->
                                     { state | email = val }
-
-                                _ ->
-                                    state
                     in
                     ( { model | editModal = Just updated }, Cmd.none )
 
@@ -773,31 +779,31 @@ viewEditModalError maybeError =
 viewEditModalForm : EditModalState -> Html Msg
 viewEditModalForm state =
     div [ class "flex flex-col gap-4" ]
-        [ viewEditField "name" "Full Name *" "text" state.name
-        , viewEditField "dateTime" "Appointment Date & Time *" "datetime-local" state.dateTime
+        [ viewEditField Name "Full Name *" "text" state.name
+        , viewEditField DateTime "Appointment Date & Time *" "datetime-local" state.dateTime
         , div [ class "flex flex-col gap-1" ]
             [ label [ class "input-label" ] [ text "Description *" ]
             , textarea
                 [ class "input-textarea"
                 , value state.description
-                , onInput (EditField "description")
+                , onInput (EditField Description)
                 ]
                 []
             ]
-        , viewEditField "contactNumber" "Contact Number *" "tel" state.contactNumber
-        , viewEditField "email" "Email Address *" "email" state.email
+        , viewEditField ContactNumber "Contact Number *" "tel" state.contactNumber
+        , viewEditField Email "Email Address *" "email" state.email
         ]
 
 
-viewEditField : String -> String -> String -> String -> Html Msg
-viewEditField fieldName labelText inputType fieldValue =
+viewEditField : Field -> String -> String -> String -> Html Msg
+viewEditField field labelText inputType fieldValue =
     div [ class "flex flex-col gap-1" ]
         [ label [ class "input-label" ] [ text labelText ]
         , input
             [ class "input-field-filled"
             , type_ inputType
             , value fieldValue
-            , onInput (EditField fieldName)
+            , onInput (EditField field)
             ]
             []
         ]
@@ -842,46 +848,18 @@ viewApproveModal maybeAppointment approving =
             text ""
 
         Just appointment ->
-            div [ class "modal-overlay z-50" ]
-                [ div [ class "modal-card max-w-sm w-full mx-4 text-center" ]
-                    [ div [ class "flex flex-col items-center gap-3 mb-4" ]
-                        [ div [ class "w-12 h-12 bg-approved rounded-full flex items-center justify-center text-accent-primary" ]
-                            [ Icons.approveCheck 22 ]
-                        , h2 [ class "text-lg font-bold text-foreground-primary" ]
-                            [ text "Approve Appointment" ]
-                        , p [ class "text-sm text-foreground-secondary" ]
-                            [ text ("Are you sure you want to approve the appointment for " ++ appointment.name ++ " on " ++ formatDateTime appointment.dateTime ++ "?") ]
-                        ]
-                    , div [ class "flex gap-3 justify-center" ]
-                        [ button
-                            [ class "btn-secondary"
-                            , onClick CloseApproveModal
-                            ]
-                            [ text "Cancel" ]
-                        , button
-                            [ class
-                                ("btn-primary"
-                                    ++ (if approving then
-                                            " opacity-75 cursor-not-allowed"
-
-                                        else
-                                            ""
-                                       )
-                                )
-                            , onClick ConfirmApprove
-                            , disabled approving
-                            ]
-                            [ text
-                                (if approving then
-                                    "Approving..."
-
-                                 else
-                                    "Approve"
-                                )
-                            ]
-                        ]
-                    ]
-                ]
+            ConfirmModal.view
+                { icon = Icons.approveCheck 22
+                , iconWrapperClass = "bg-approved text-accent-primary"
+                , title = "Approve Appointment"
+                , message = "Are you sure you want to approve the appointment for " ++ appointment.name ++ " on " ++ formatDateTime appointment.dateTime ++ "?"
+                , confirmClass = "btn-primary"
+                , confirmLabel = "Approve"
+                , loadingLabel = "Approving..."
+                , onCancel = CloseApproveModal
+                , onConfirm = ConfirmApprove
+                , loading = approving
+                }
 
 
 viewDeleteModal : Maybe Appointment -> Bool -> Html Msg
@@ -891,46 +869,18 @@ viewDeleteModal maybeAppointment deleting =
             text ""
 
         Just appointment ->
-            div [ class "modal-overlay z-50" ]
-                [ div [ class "modal-card max-w-sm w-full mx-4 text-center" ]
-                    [ div [ class "flex flex-col items-center gap-3 mb-4" ]
-                        [ div [ class "w-12 h-12 bg-danger-light rounded-full flex items-center justify-center text-danger" ]
-                            [ Icons.deleteTrash 22 ]
-                        , h2 [ class "text-lg font-bold text-foreground-primary" ]
-                            [ text "Delete Appointment" ]
-                        , p [ class "text-sm text-foreground-secondary" ]
-                            [ text ("Are you sure you want to delete the appointment for " ++ appointment.name ++ "? This action cannot be undone.") ]
-                        ]
-                    , div [ class "flex gap-3 justify-center" ]
-                        [ button
-                            [ class "btn-secondary"
-                            , onClick CloseDeleteModal
-                            ]
-                            [ text "Cancel" ]
-                        , button
-                            [ class
-                                ("btn-danger"
-                                    ++ (if deleting then
-                                            " opacity-75 cursor-not-allowed"
-
-                                        else
-                                            ""
-                                       )
-                                )
-                            , onClick ConfirmDelete
-                            , disabled deleting
-                            ]
-                            [ text
-                                (if deleting then
-                                    "Deleting..."
-
-                                 else
-                                    "Delete"
-                                )
-                            ]
-                        ]
-                    ]
-                ]
+            ConfirmModal.view
+                { icon = Icons.deleteTrash 22
+                , iconWrapperClass = "bg-danger-light text-danger"
+                , title = "Delete Appointment"
+                , message = "Are you sure you want to delete the appointment for " ++ appointment.name ++ "? This action cannot be undone."
+                , confirmClass = "btn-danger"
+                , confirmLabel = "Delete"
+                , loadingLabel = "Deleting..."
+                , onCancel = CloseDeleteModal
+                , onConfirm = ConfirmDelete
+                , loading = deleting
+                }
 
 
 viewDashboardHeader : Model -> Html Msg
